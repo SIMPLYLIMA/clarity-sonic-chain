@@ -15,7 +15,7 @@ Clarinet.test({
         let block = chain.mineBlock([
             Tx.contractCall('sonic_chain', 'register-track', [
                 types.ascii("Test Song"),
-                types.ascii("Test Artist"),
+                types.ascii("Test Artist"), 
                 types.ascii("Standard License"),
                 types.uint(1000)
             ], deployer.address)
@@ -35,6 +35,56 @@ Clarinet.test({
         let track = getTrack.result.expectSome().expectTuple();
         assertEquals(track['title'], "Test Song");
         assertEquals(track['artist'], "Test Artist");
+    }
+});
+
+Clarinet.test({
+    name: "Can list and purchase a license",
+    async fn(chain: Chain, accounts: Map<string, Account>) {
+        const deployer = accounts.get('deployer')!;
+        const buyer = accounts.get('wallet_1')!;
+        
+        // Register track
+        let block = chain.mineBlock([
+            Tx.contractCall('sonic_chain', 'register-track', [
+                types.ascii("Test Song"),
+                types.ascii("Test Artist"),
+                types.ascii("Standard License"),
+                types.uint(1000)
+            ], deployer.address)
+        ]);
+        
+        // List for sale
+        let listing = chain.mineBlock([
+            Tx.contractCall('sonic_chain', 'list-license', [
+                types.uint(1),
+                types.uint(500),
+                types.uint(1000)
+            ], deployer.address)
+        ]);
+        
+        listing.receipts[0].result.expectOk();
+        
+        // Purchase license
+        let purchase = chain.mineBlock([
+            Tx.contractCall('sonic_chain', 'purchase-license', [
+                types.uint(1)
+            ], buyer.address)
+        ]);
+        
+        purchase.receipts[0].result.expectOk();
+        
+        // Verify purchase
+        let getListing = chain.callReadOnlyFn(
+            'sonic_chain',
+            'get-license-listing',
+            [types.uint(1)],
+            deployer.address
+        );
+        
+        let marketListing = getListing.result.expectSome().expectTuple();
+        assertEquals(marketListing['buyer'], buyer.address);
+        assertEquals(marketListing['active'], types.bool(false));
     }
 });
 

@@ -3,9 +3,11 @@
 ;; Constants
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
-(define-constant err-not-owner (err u101))
+(define-constant err-not-owner (err u101))  
 (define-constant err-already-registered (err u102))
 (define-constant err-not-found (err u103))
+(define-constant err-invalid-price (err u104))
+(define-constant err-insufficient-funds (err u105))
 
 ;; Data structures
 (define-map audio-tracks 
@@ -16,7 +18,8 @@
         artist: (string-ascii 50),
         timestamp: uint,
         license-type: (string-ascii 20),
-        price: uint
+        price: uint,
+        for-sale: bool
     }
 )
 
@@ -25,6 +28,16 @@
     { 
         total-earned: uint,
         last-payout: uint
+    }
+)
+
+(define-map license-marketplace
+    { track-id: uint }
+    {
+        buyer: principal,
+        price: uint,
+        expires: uint,
+        active: bool
     }
 )
 
@@ -47,7 +60,8 @@
                 artist: artist,
                 timestamp: block-height,
                 license-type: license-type,
-                price: price
+                price: price,
+                for-sale: false
             }
         )
         (map-insert track-royalties
@@ -59,6 +73,66 @@
         )
         (var-set last-track-id track-id)
         (ok track-id)
+    )
+)
+
+;; List track license for sale
+(define-public (list-license (track-id uint) (price uint) (duration uint))
+    (let
+        (
+            (track (unwrap! (map-get? audio-tracks { track-id: track-id }) err-not-found))
+        )
+        (asserts! (is-eq (get owner track) tx-sender) err-not-owner)
+        (asserts! (> price u0) err-invalid-price)
+        (map-set audio-tracks
+            { track-id: track-id }
+            (merge track { for-sale: true })
+        )
+        (map-insert license-marketplace
+            { track-id: track-id }
+            {
+                buyer: tx-sender,
+                price: price,
+                expires: (+ block-height duration),
+                active: true
+            }
+        )
+        (ok true)
+    )
+)
+
+;; Purchase track license
+(define-public (purchase-license (track-id uint))
+    (let
+        (
+            (track (unwrap! (map-get? audio-tracks { track-id: track-id }) err-not-found))
+            (listing (unwrap! (map-get? license-marketplace { track-id: track-id }) err-not-found))
+        )
+        (asserts! (get for-sale track) err-not-found)
+        (asserts! (get active listing) err-not-found)
+        (asserts! (>= (stx-get-balance tx-sender) (get price listing)) err-insufficient-funds)
+        
+        ;; Transfer payment
+        (try! (stx-transfer? (get price listing) tx-sender (get owner track)))
+        
+        ;; Update royalties
+        (map-set track-royalties
+            { track-id: track-id }
+            {
+                total-earned: (+ (get total-earned (unwrap! (map-get? track-royalties { track-id: track-id }) err-not-found)) (get price listing)),
+                last-payout: block-height
+            }
+        )
+        
+        ;; Update marketplace status
+        (map-set license-marketplace
+            { track-id: track-id }
+            (merge listing {
+                buyer: tx-sender,
+                active: false
+            })
+        )
+        (ok true)
     )
 )
 
@@ -122,4 +196,8 @@
 
 (define-read-only (get-track-royalties (track-id uint))
     (map-get? track-royalties { track-id: track-id })
+)
+
+(define-read-only (get-license-listing (track-id uint))
+    (map-get? license-marketplace { track-id: track-id })
 )
