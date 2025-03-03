@@ -1,7 +1,7 @@
-[Previous tests remain unchanged, adding new tests below]
+[Previous tests remain unchanged]
 
 Clarinet.test({
-    name: "Cannot list a track license twice",
+    name: "Can relist a track license after expiration",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         
@@ -16,12 +16,15 @@ Clarinet.test({
             Tx.contractCall('sonic_chain', 'list-license', [
                 types.uint(1),
                 types.uint(500),
-                types.uint(1000)
+                types.uint(10)
             ], deployer.address)
         ]);
         
-        // Try to list again
-        let secondListing = chain.mineBlock([
+        // Advance blockchain past expiration
+        chain.mineEmptyBlockUntil(20);
+        
+        // Try to relist
+        let relisting = chain.mineBlock([
             Tx.contractCall('sonic_chain', 'list-license', [
                 types.uint(1),
                 types.uint(600),
@@ -29,12 +32,12 @@ Clarinet.test({
             ], deployer.address)
         ]);
         
-        secondListing.receipts[0].result.expectErr(106); // err-already-listed
+        relisting.receipts[0].result.expectOk();
     }
 });
 
 Clarinet.test({
-    name: "Can delist a track license",
+    name: "Cannot purchase own track license",
     async fn(chain: Chain, accounts: Map<string, Account>) {
         const deployer = accounts.get('deployer')!;
         
@@ -53,24 +56,13 @@ Clarinet.test({
             ], deployer.address)
         ]);
         
-        // Delist track
-        let delist = chain.mineBlock([
-            Tx.contractCall('sonic_chain', 'delist-license', [
+        // Try to purchase own listing
+        let purchase = chain.mineBlock([
+            Tx.contractCall('sonic_chain', 'purchase-license', [
                 types.uint(1)
             ], deployer.address)
         ]);
         
-        delist.receipts[0].result.expectOk();
-        
-        // Verify listing is inactive
-        let getListing = chain.callReadOnlyFn(
-            'sonic_chain',
-            'get-license-listing',
-            [types.uint(1)],
-            deployer.address
-        );
-        
-        let listing = getListing.result.expectSome().expectTuple();
-        assertEquals(listing['active'], types.bool(false));
+        purchase.receipts[0].result.expectErr(109); // err-self-purchase
     }
 });
